@@ -1,0 +1,184 @@
+import { GoogleGenAI } from "@google/genai";
+import { PDFDocument } from "pdf-lib";
+import { PageDataMap } from "../types";
+
+// Number of pages to process in a single AI request.
+// 3 pages is a safe balance between speed and preventing output token truncation.
+const BATCH_SIZE = 3;
+
+const processFile = async (
+  base64Data: string,
+  apiKey: string,
+  onProgress?: (message: string) => void
+): Promise<PageDataMap> => {
+  if (!apiKey) {
+    throw new Error("找不到 API 金鑰，請確認環境變數 process.env.API_KEY 已設定。");
+  }
+
+  // Load the PDF document
+  let pdfDoc;
+  try {
+    pdfDoc = await PDFDocument.load(base64Data);
+  } catch (e) {
+    throw new Error("無法讀取 PDF 檔案，請確認檔案是否損毀。");
+  }
+
+  const totalPages = pdfDoc.getPageCount();
+  const aggregatedData: PageDataMap = {};
+  const ai = new GoogleGenAI({ apiKey });
+
+  // Loop through the PDF in batches
+  for (let i = 0; i < totalPages; i += BATCH_SIZE) {
+    const startPage = i + 1;
+    const endPage = Math.min(i + BATCH_SIZE, totalPages);
+    
+    if (onProgress) {
+      onProgress(`正在分析第 ${startPage} - ${endPage} 頁 (共 ${totalPages} 頁)...`);
+    }
+
+    // Create a new sub-document for this batch
+    const subDoc = await PDFDocument.create();
+    // Copy pages from source (indices are 0-based)
+    const pageIndices = [];
+    for (let j = 0; j < (endPage - startPage + 1); j++) {
+        pageIndices.push(i + j);
+    }
+    
+    const copiedPages = await subDoc.copyPages(pdfDoc, pageIndices);
+    copiedPages.forEach((page) => subDoc.addPage(page));
+
+    // Save sub-document as base64
+    const subPdfBase64 = await subDoc.saveAsBase64();
+
+    // Call Gemini for this batch
+    try {
+        const batchResult = await callGeminiWithRetry(ai, subPdfBase64);
+        
+        // Merge batch result into aggregated data
+        // IMPORTANT: Gemini might return keys "1", "2" relative to the chunk.
+        // We need to map them to the global page number.
+        
+        // Strategy: Iterate through keys returned by Gemini
+        // If Gemini returns "1", map to startPage. If "2", map to startPage + 1.
+        Object.keys(batchResult).forEach(localKey => {
+            // Attempt to parse the key as a number
+            const localNum = parseInt(localKey.replace(/\D/g, ''));
+            
+            if (!isNaN(localNum)) {
+                // Calculate global page number
+                // Note: localNum is usually 1-based relative to the chunk provided.
+                // e.g., if we sent pages 4,5,6. AI sees a 3-page PDF. It calls them Page 1, 2, 3.
+                // globalPage = (batchStartOffset) + localNum
+                // i is the batchStartOffset (0, 3, 6...)
+                const globalPageNum = i + localNum;
+                aggregatedData[String(globalPageNum)] = batchResult[localKey];
+            } else {
+                // Fallback for weird keys, just append
+                aggregatedData[`${localKey}_batch_${startPage}`] = batchResult[localKey];
+            }
+        });
+
+    } catch (batchError) {
+        console.error(`Error processing batch ${startPage}-${endPage}:`, batchError);
+        // We generally want to continue even if one batch fails, but maybe log it?
+        // For now, let's throw to stop and let user retry, or we could skip.
+        // Let's try to return partial data if we crash? No, throw is safer to alert user.
+        throw new Error(`第 ${startPage}-${endPage} 頁處理失敗: ${batchError instanceof Error ? batchError.message : "未知錯誤"}`);
+    }
+  }
+
+  return aggregatedData;
+};
+
+// Extracted AI call logic for cleaner batch loop
+async function callGeminiWithRetry(ai: GoogleGenAI, base64Data: string): Promise<PageDataMap> {
+    const systemInstruction = `
+    你是一個高階會計報表結構還原引擎。
+    任務：將 PDF 文件轉換為結構化的 JSON 資料。
+
+    **關鍵規則 (Grid System)**：
+    1.  **結構**：回傳 JSON 物件，Key="1", "2"... (相對頁碼)，Value=二維陣列 \`[["A1"], ["A2", "B2"]]\`。
+    2.  **極致精簡 (Token Saving)**：
+        *   **列尾去空**：如果一列的最後面是空白儲存格，**請直接移除**，不要輸出空字串。
+        *   範例：原本 \`["數據", "", ""]\` -> 請輸出 \`["數據"]\`。
+        *   Excel 會自動處理缺少的欄位，這樣可以節省大量 Token。
+        *   **禁止**重複輸出表頭，除非該頁面真的有表頭。
+    3.  **視覺還原**：
+        *   依照原本文件的視覺排版。
+        *   包含頁首、頁尾、附註、單位說明。
+        *   列中間的空白必須保留為 "" 以維持對齊。
+    4.  **轉義**：所有雙引號 " 必須轉義為 \\"。
+
+    **JSON 格式範例**：
+    {
+      "1": [
+         ["公司損益表"], 
+         ["項目", "金額", "備註"],
+         ["收入", "1,000"] 
+      ]
+    }
+  `;
+
+  const prompt = `
+    分析此 PDF 片段並回傳 JSON。
+    請注意：這是一個大型文件的其中一部分。請回傳本片段中每一頁的資料。
+    Key 請使用 1, 2, 3... 代表此片段的第幾頁。
+  `;
+
+  const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: {
+        parts: [
+          { inlineData: { mimeType: "application/pdf", data: base64Data } },
+          { text: prompt }
+        ]
+      },
+      config: {
+        systemInstruction: systemInstruction,
+        responseMimeType: "application/json",
+      }
+    });
+
+    const textResponse = response.text;
+    if (!textResponse) throw new Error("Gemini 沒有回傳資料");
+
+    let jsonString = textResponse.trim();
+    if (jsonString.startsWith('```')) {
+        jsonString = jsonString.replace(/^```(json)?/i, '').replace(/```$/, '').trim();
+    }
+    jsonString = jsonString.replace(/^\s*\/\/.*$/gm, '');
+    const firstBracket = jsonString.indexOf('{');
+    if (firstBracket !== -1) jsonString = jsonString.substring(firstBracket);
+
+    try {
+        return JSON.parse(jsonString) as PageDataMap;
+    } catch (parseError) {
+        console.warn("JSON Parse Failed, attempting repair...");
+        const repaired = tryRepairJson(jsonString);
+        if (repaired) return repaired as PageDataMap;
+        throw new Error("JSON 解析失敗 (Truncated)");
+    }
+}
+
+function tryRepairJson(jsonStr: string): any {
+    const lastRowEnd = jsonStr.lastIndexOf('],');
+    const lastRowEndBracket = jsonStr.lastIndexOf(']');
+    let cutIndex = -1;
+    if (lastRowEnd !== -1) cutIndex = lastRowEnd + 1; 
+    else if (lastRowEndBracket !== -1) cutIndex = lastRowEndBracket + 1;
+
+    if (cutIndex === -1) return null;
+
+    let fixedStr = jsonStr.substring(0, cutIndex);
+    const candidates = ['}}', ']}', ']]}'];
+    for (const suffix of candidates) {
+        try {
+            return JSON.parse(fixedStr + suffix);
+        } catch (e) {}
+    }
+    try { return JSON.parse(fixedStr + ']}'); } catch (e) { return null; }
+}
+
+export const GeminiService = {
+  processFile
+};

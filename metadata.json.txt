@@ -1,0 +1,5 @@
+{
+  "name": "Gemini PDF 轉 Excel 專家",
+  "description": "強大的 PDF 轉 Excel 工具，支援掃描檔 OCR 與複雜會計報表格式還原。由 Gemini AI 驅動。",
+  "requestFramePermissions": []
+}

@@ -1,0 +1,34 @@
+import { GridData } from "../types";
+
+export const convertToCSV = (data: GridData): string => {
+  if (!data || data.length === 0) return "";
+
+  // The data is a 2D array of strings (GridData = string[][]), 
+  // so we just map rows to CSV lines directly without header extraction.
+  return data.map(row => {
+    return row.map(cell => {
+      // Handle potential null/undefined though types say string
+      const val = cell ?? "";
+      // Escape double quotes by doubling them (standard CSV escaping)
+      const escaped = String(val).replace(/"/g, '""');
+      // Wrap field in quotes
+      return `"${escaped}"`;
+    }).join(",");
+  }).join("\n");
+};
+
+export const downloadCSV = (csvContent: string, filename: string) => {
+  // Add BOM for Excel to recognize UTF-8 correctly
+  const bom = "\uFEFF"; 
+  const blob = new Blob([bom + csvContent], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+  if (link.download !== undefined) {
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", filename);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+};

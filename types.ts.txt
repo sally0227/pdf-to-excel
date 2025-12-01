@@ -1,0 +1,22 @@
+// A single row is just an array of strings (cell values)
+export type GridRow = string[];
+
+// A page is a 2D array (list of rows)
+export type GridData = GridRow[];
+
+// The full extracted data is a map of Page Name -> Grid Data
+// Example: { "Page 1": [["Header"], ["Data"]], "Page 2": [...] }
+export type PageDataMap = Record<string, GridData>;
+
+export interface ProcessingState {
+  isProcessing: boolean;
+  progress: number; // 0 to 100
+  error: string | null;
+}
+
+export interface FileData {
+  name: string;
+  type: string;
+  size: number;
+  base64: string;
+}
