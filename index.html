@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Gemini PDF 轉 Excel 專家</title>
+    <!-- We keep Tailwind CDN for simplicity, but in a full production app you might want to install it via PostCSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
     <style>
@@ -18,15 +19,19 @@
     "react": "https://aistudiocdn.com/react@^19.2.0",
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
     "react/": "https://aistudiocdn.com/react@^19.2.0/",
-    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0",
     "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
-    "xlsx": "https://esm.sh/xlsx@0.18.5",
-    "pdf-lib": "https://esm.sh/pdf-lib@1.17.1"
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0",
+    "vite": "https://aistudiocdn.com/vite@^7.2.6",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1",
+    "xlsx": "https://aistudiocdn.com/xlsx@^0.18.5",
+    "pdf-lib": "https://aistudiocdn.com/pdf-lib@^1.17.1"
   }
 }
 </script>
 </head>
   <body>
     <div id="root"></div>
+    <!-- Point to the TypeScript entry file directly. Vite will handle the compilation. -->
+    <script type="module" src="/index.tsx"></script>
   </body>
 </html>
