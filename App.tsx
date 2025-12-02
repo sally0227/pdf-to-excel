@@ -95,14 +95,24 @@ const App: React.FC = () => {
 
   const handleDownloadMerged = () => {
     if (Object.keys(extractedData).length === 0) return;
-    const fileName = fileData?.name ? fileData.name.replace('.pdf', '_merged.xlsx') : 'data_merged.xlsx';
-    downloadExcel(extractedData, fileName, 'merge');
+    try {
+      const fileName = fileData?.name ? fileData.name.replace('.pdf', '_merged.xlsx') : 'data_merged.xlsx';
+      downloadExcel(extractedData, fileName, 'merge');
+    } catch (error) {
+      console.error("Download failed:", error);
+      setStatus(prev => ({ ...prev, error: "Excel 產生失敗，請稍後再試。" }));
+    }
   };
 
   const handleDownloadSplit = () => {
     if (Object.keys(extractedData).length === 0) return;
-    const fileName = fileData?.name ? fileData.name.replace('.pdf', '_split.xlsx') : 'data_split.xlsx';
-    downloadExcel(extractedData, fileName, 'split');
+    try {
+      const fileName = fileData?.name ? fileData.name.replace('.pdf', '_split.xlsx') : 'data_split.xlsx';
+      downloadExcel(extractedData, fileName, 'split');
+    } catch (error) {
+      console.error("Download failed:", error);
+      setStatus(prev => ({ ...prev, error: "Excel 產生失敗，請稍後再試。" }));
+    }
   };
 
   const handleReset = () => {
