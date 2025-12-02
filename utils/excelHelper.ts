@@ -1,5 +1,19 @@
 import * as XLSX from 'xlsx';
-import { PageDataMap } from "../types";
+import { PageDataMap, GridData } from "../types";
+
+// Helper to sanitize data before passing to SheetJS
+// This ensures no null/undefined values cause silent failures
+const sanitizeGridData = (rows: GridData): string[][] => {
+  if (!Array.isArray(rows)) return [];
+  
+  return rows.map(row => {
+    if (!Array.isArray(row)) return [];
+    return row.map(cell => {
+      if (cell === null || cell === undefined) return "";
+      return String(cell);
+    });
+  });
+};
 
 export const downloadExcel = (data: PageDataMap, filename: string, mode: 'merge' | 'split') => {
   const wb = XLSX.utils.book_new();
@@ -16,10 +30,10 @@ export const downloadExcel = (data: PageDataMap, filename: string, mode: 'merge'
     });
 
     sortedPages.forEach(pageKey => {
-      const pageRows = data[pageKey];
-      // Optional: Add a visual separator row if merging, but user asked for raw data mainly.
-      // We will just append them.
-      allRows = [...allRows, ...pageRows];
+      // Sanitize the rows for this page
+      const cleanRows = sanitizeGridData(data[pageKey]);
+      
+      allRows = [...allRows, ...cleanRows];
       // Add an empty row between pages for readability
       allRows.push([]); 
     });
@@ -38,10 +52,11 @@ export const downloadExcel = (data: PageDataMap, filename: string, mode: 'merge'
     sortedPages.forEach(pageKey => {
       // Create a clean sheet name (e.g., "Page 1")
       let sheetName = pageKey.includes("Page") || pageKey.includes("頁") ? pageKey : `Page ${pageKey}`;
-      // Excel sheet names max 31 chars
-      sheetName = sheetName.substring(0, 31);
+      // Excel sheet names max 31 chars and no special chars ideally
+      sheetName = sheetName.replace(/[:\/\\?*\[\]]/g, "").substring(0, 31);
       
-      const ws = XLSX.utils.aoa_to_sheet(data[pageKey]);
+      const cleanRows = sanitizeGridData(data[pageKey]);
+      const ws = XLSX.utils.aoa_to_sheet(cleanRows);
       XLSX.utils.book_append_sheet(wb, ws, sheetName);
     });
   }
